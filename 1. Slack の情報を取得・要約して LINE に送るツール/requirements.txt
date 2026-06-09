@@ -1,0 +1,4 @@
+slack_sdk
+anthropic
+requests
+python-dotenv
