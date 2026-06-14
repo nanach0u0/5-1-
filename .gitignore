@@ -33,5 +33,8 @@ ENV/
 logs/
 *.log
 
+# Google サービスアカウントキー
+credentials.json
+
 # Jupyter
 .ipynb_checkpoints/
