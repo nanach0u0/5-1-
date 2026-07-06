@@ -36,5 +36,8 @@ logs/
 # Google サービスアカウントキー
 credentials.json
 
+# 文字起こしテキスト
+transcript.txt
+
 # Jupyter
 .ipynb_checkpoints/
