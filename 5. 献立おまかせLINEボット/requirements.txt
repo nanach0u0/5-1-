@@ -1,4 +1,7 @@
 requests
 python-dotenv
 anthropic
+fastapi
+uvicorn
 pytest
+httpx

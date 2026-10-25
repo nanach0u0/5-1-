@@ -37,7 +37,8 @@ CHALLENGE_RULES = """
 INTERPRET_SYSTEM = """ユーザーが夕食について送ってきた文章から、今日のコンディションと気分を読み取ります。
 - condition: ヘトヘト（疲れている・作る気力がない）／ふつう／余裕あり（時間や元気がある）
 - mood: がっつり（肉・こってり・たくさん食べたい）／さっぱり（あっさり・軽め）／なんでも（特にこだわりなし）
-はっきりしないときは condition は「ふつう」、mood は「なんでも」にする。"""
+はっきりしないときは condition は「ふつう」、mood は「なんでも」にする。
+- about_meal: 今日の食事・献立の相談として読めるなら true。お礼やあいさつなど、食事と関係ない文章なら false"""
 
 
 def _client(client: Optional[anthropic.Anthropic]) -> anthropic.Anthropic:
@@ -145,16 +146,23 @@ def select_menu(
     return proposals
 
 
-def interpret(text: str, client: Optional[anthropic.Anthropic] = None) -> tuple[str, str]:
-    """「疲れたけど肉食べたい」のような自由文を (コンディション, 気分) に読み替える。"""
+def interpret(
+    text: str, client: Optional[anthropic.Anthropic] = None
+) -> Optional[tuple[str, str]]:
+    """「疲れたけど肉食べたい」のような自由文を (コンディション, 気分) に読み替える。
+    食事と関係ない文章なら None。
+    """
     schema = {
         "type": "object",
         "properties": {
             "condition": {"type": "string", "enum": list(ALLOWED_EFFORTS)},
             "mood": {"type": "string", "enum": list(MOODS)},
+            "about_meal": {"type": "boolean"},
         },
-        "required": ["condition", "mood"],
+        "required": ["condition", "mood", "about_meal"],
         "additionalProperties": False,
     }
     data = _ask_json(_client(client), INTERPRET_SYSTEM, text, schema)
+    if not data["about_meal"]:
+        return None
     return data["condition"], data["mood"]

@@ -32,10 +32,14 @@ def format_proposal(p: Proposal) -> str:
 def parse_args(args: list[str]) -> tuple[str, str]:
     if len(args) == 1 and args[0] not in ALLOWED_EFFORTS:
         try:
-            condition, mood = interpret(args[0])
+            interpreted = interpret(args[0])
         except Exception as e:
             print(f"自由文を読み替えられなかったので「ふつう／なんでも」にします（{e}）")
             return "ふつう", MOOD_ANY
+        if interpreted is None:
+            print("献立の相談として読めませんでした")
+            sys.exit(1)
+        condition, mood = interpreted
         print(f"読み替え: コンディション={condition}、気分={mood}")
         return condition, mood
     if 1 <= len(args) <= 2 and args[0] in ALLOWED_EFFORTS:

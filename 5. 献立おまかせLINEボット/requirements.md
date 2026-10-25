@@ -206,7 +206,8 @@ GitHub Actions（30分おきの cron）
 | `cli.py` | LINE なしで提案を試す CLI（`python cli.py ヘトヘト`） |
 | `recommender.py` | 候補の絞り込み（ルール）と最終選択の呼び出し |
 | `claude_client.py` | 自由文の読み替え、最終選択 |
-| `line_messages.py` | クイックリプライ・ボタンなどのメッセージ組み立て |
+| `line_messages.py` | クイックリプライ・ボタンなどのメッセージ組み立て、postback データ（会話の状態）の作成 |
+| `line_api.py` | LINE の署名検証、返信（reply）、ローディング表示 |
 | `followup.py` | GitHub Actions から実行する「作った？」送信スクリプト |
 | `tests/` | 絞り込みロジックなどの単体テスト |
 

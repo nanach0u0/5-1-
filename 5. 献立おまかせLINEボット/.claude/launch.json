@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "kondate-bot",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "main:app", "--port", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "ngrok",
+      "runtimeExecutable": "ngrok",
+      "runtimeArgs": ["http", "8000", "--log", "stdout"],
+      "port": 4040
+    }
+  ]
+}

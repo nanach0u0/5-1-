@@ -136,5 +136,10 @@ def test_select_menu_raises_on_refusal():
 
 
 def test_interpret():
-    client = FakeClient({"condition": "ヘトヘト", "mood": "がっつり"})
+    client = FakeClient({"condition": "ヘトヘト", "mood": "がっつり", "about_meal": True})
     assert interpret("疲れたけど肉食べたい", client=client) == ("ヘトヘト", "がっつり")
+
+
+def test_interpret_not_about_meal():
+    client = FakeClient({"condition": "ふつう", "mood": "なんでも", "about_meal": False})
+    assert interpret("ありがとう", client=client) is None
