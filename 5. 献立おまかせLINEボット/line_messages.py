@@ -10,7 +10,8 @@ import re
 from typing import Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from recipe import Recipe
+from notion_repo import Log
+from recipe import RATING_BAD, RATING_GOOD, RATING_SO_SO, Recipe
 from recommender import ALLOWED_EFFORTS, MOODS, Proposal
 
 POSTBACK_LIMIT = 300
@@ -154,6 +155,50 @@ def no_candidates_message() -> dict:
 
 def decided_message() -> dict:
     return _text("いってらっしゃい！")
+
+
+def confirm_message(log: Log) -> dict:
+    """[これにする]から約90分後に送る「作った？」。"""
+    return _text(
+        f"さっき決めた「{log.menu}」、作った？",
+        [
+            _postback("作った", {"a": "made", "l": log.id}),
+            _postback("作ってない", {"a": "notmade", "l": log.id}),
+        ],
+    )
+
+
+def made_message(untried: Optional[Recipe]) -> dict:
+    """[作った]への返事。作ったことないレシピが含まれていたら評価を聞く。"""
+    text = "おつかれさま！記録しておきました"
+    if untried is None:
+        return _text(text)
+    return _text(
+        f"{text}\n初めての「{untried.name}」、どうだった？",
+        [
+            _postback(v, {"a": "rate", "r": untried.id, "v": v})
+            for v in (RATING_GOOD, RATING_SO_SO, RATING_BAD)
+        ],
+    )
+
+
+def not_made_message() -> dict:
+    return _text("了解！また今度作りましょう")
+
+
+def already_recorded_message() -> dict:
+    return _text("この献立はもう記録してあります")
+
+
+RATED_TEXT = {
+    RATING_GOOD: "一軍入り！次から候補に入れておきます",
+    RATING_SO_SO: "了解、記録しておきました。これからは候補に出さないでおきます",
+    RATING_BAD: "残念…記録しておきました。もう提案しません",
+}
+
+
+def rated_message(rating: str) -> dict:
+    return _text(RATED_TEXT[rating])
 
 
 def help_message() -> dict:

@@ -1,8 +1,12 @@
 import os
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# 日付の判定（かぶり防止、最後に作った日）は日本時間で行う
+JST = ZoneInfo("Asia/Tokyo")
 
 NOTION_TOKEN = os.getenv("NOTION_TOKEN", "")
 NOTION_RECIPE_DS_ID = os.getenv("NOTION_RECIPE_DS_ID", "9a833992-d10e-4ff2-be5d-46556c73702c")

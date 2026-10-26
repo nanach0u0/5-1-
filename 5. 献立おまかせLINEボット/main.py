@@ -1,4 +1,4 @@
-"""LINE Webhook の受け口（requirements.md 3.1, 6章）。
+"""LINE Webhook の受け口（requirements.md 3章, 6章）。
 
 起動: uvicorn main:app --port 8000
 """
@@ -8,7 +8,6 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Callable, Optional
-from zoneinfo import ZoneInfo
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
@@ -16,17 +15,42 @@ import config
 import line_messages as msg
 from claude_client import interpret, select_menu
 from line_api import reply, show_loading, verify_signature
-from notion_repo import fetch_recipes
-from recipe import Recipe
+import notion_repo
+from notion_repo import STATUS_MADE, STATUS_NOT_MADE, STATUS_PENDING, Log
+from recipe import RATING_BAD, RATING_GOOD, RATING_SO_SO, Recipe
 from recommender import ALLOWED_EFFORTS, MOODS, Selector, suggest
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-JST = ZoneInfo("Asia/Tokyo")
-
 # これを含むメッセージなら、ボタンで状態を聞くところから始める
 TRIGGERS = ("何食べよう", "なに食べよう", "何食べる", "献立", "ごはん", "ご飯")
+
+
+class NotionStore:
+    """献立ログとレシピの更新（Bot から使う Notion の操作）。"""
+
+    def __init__(self, token: str, log_data_source_id: str):
+        self.token = token
+        self.log_data_source_id = log_data_source_id
+
+    def create_log(self, recipes: list[Recipe], decided_at: datetime) -> str:
+        return notion_repo.create_log(self.token, self.log_data_source_id, recipes, decided_at)
+
+    def fetch_log(self, log_id: str) -> Log:
+        return notion_repo.fetch_log(self.token, log_id)
+
+    def update_log(self, log_id: str, status: str) -> None:
+        notion_repo.update_log(self.token, log_id, status=status)
+
+    def fetch_recipe(self, recipe_id: str) -> Optional[Recipe]:
+        return notion_repo.fetch_recipe(self.token, recipe_id)
+
+    def set_last_made(self, recipe_id: str, day: date) -> None:
+        notion_repo.set_last_made(self.token, recipe_id, day)
+
+    def set_rating(self, recipe_id: str, rating: str) -> None:
+        notion_repo.set_rating(self.token, recipe_id, rating)
 
 
 @dataclass
@@ -36,7 +60,8 @@ class Bot:
     load_recipes: Callable[[], list[Recipe]]
     select: Optional[Selector]
     interpret: Callable[[str], Optional[tuple[str, str]]]
-    today: Callable[[], date]
+    now: Callable[[], datetime]
+    store: Optional[NotionStore] = None
 
     def handle_text(self, text: str) -> list[dict]:
         if any(t in text for t in TRIGGERS):
@@ -62,8 +87,12 @@ class Bot:
         if action == "more" and condition in ALLOWED_EFFORTS and mood in MOODS:
             return self._more(condition, mood, data["h"])
         if action == "pick":
-            # 献立ログへの記録はステップ5で追加する
-            return [msg.decided_message()]
+            return self._pick(data["s"])
+        if action in ("made", "notmade"):
+            return self._confirm(data["l"], made=action == "made")
+        if action == "rate" and data.get("v") in (RATING_GOOD, RATING_SO_SO, RATING_BAD):
+            self.store.set_rating(data["r"], data["v"])
+            return [msg.rated_message(data["v"])]
         logger.warning("知らない postback: %s", raw)
         return [msg.help_message()]
 
@@ -73,7 +102,8 @@ class Bot:
         exclude = frozenset(
             by_key[k].id for round_ in history for s in round_ for k in s if k in by_key
         )
-        proposals = suggest(recipes, condition, mood, self.today(), exclude, select=self.select)
+        today = self.now().date()
+        proposals = suggest(recipes, condition, mood, today, exclude, select=self.select)
         if not proposals:
             if history:
                 return [self._final_list(by_key, history)]
@@ -87,6 +117,32 @@ class Bot:
             return [self._final_list(by_key, history)]
         return self._propose(condition, mood, history)
 
+    def _pick(self, keys: list[str]) -> list[dict]:
+        """[これにする]／[Aにする]／[Bにする]: 献立ログに「確認待ち」で記録する（3.1）。"""
+        by_key = {msg.short_id(r): r for r in self.load_recipes()}
+        recipes = [by_key[k] for k in keys if k in by_key]
+        self.store.create_log(recipes, self.now())
+        return [msg.decided_message()]
+
+    def _confirm(self, log_id: str, made: bool) -> list[dict]:
+        """「作った？」への返事（3.2, 3.3）。"""
+        log = self.store.fetch_log(log_id)
+        if log.status != STATUS_PENDING:
+            return [msg.already_recorded_message()]
+        if not made:
+            self.store.update_log(log_id, STATUS_NOT_MADE)
+            return [msg.not_made_message()]
+
+        today = self.now().date()
+        untried = None
+        for recipe_id in log.recipe_ids:
+            self.store.set_last_made(recipe_id, today)
+            recipe = self.store.fetch_recipe(recipe_id)
+            if untried is None and recipe and recipe.is_untried:
+                untried = recipe  # 作ってみたいセットに含まれる未経験のレシピは1品だけ
+        self.store.update_log(log_id, STATUS_MADE)
+        return [msg.made_message(untried)]
+
     @staticmethod
     def _final_list(by_key: dict[str, Recipe], history: msg.History) -> dict:
         sets = [[by_key[k] for k in s if k in by_key] for round_ in history for s in round_]
@@ -94,10 +150,11 @@ class Bot:
 
 
 bot = Bot(
-    load_recipes=lambda: fetch_recipes(config.NOTION_TOKEN, config.NOTION_RECIPE_DS_ID),
+    load_recipes=lambda: notion_repo.fetch_recipes(config.NOTION_TOKEN, config.NOTION_RECIPE_DS_ID),
     select=select_menu,
     interpret=interpret,
-    today=lambda: datetime.now(JST).date(),
+    now=lambda: datetime.now(config.JST),
+    store=NotionStore(config.NOTION_TOKEN, config.NOTION_LOG_DS_ID),
 )
 
 app = FastAPI()

@@ -6,6 +6,8 @@ MAIN = "メイン"
 SIDE = "副菜"
 
 RATING_GOOD = "おいしい"
+RATING_SO_SO = "ふつう"
+RATING_BAD = "残念"
 RATING_NOT_YET = "まだ作ってない"
 
 EFFORT_EASY = "ラク"

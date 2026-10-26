@@ -4,15 +4,53 @@ import base64
 import hashlib
 import hmac
 import json
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
 
 import line_messages as msg
 import main
+from config import JST
 from line_api import verify_signature
+from notion_repo import Log
 from recipe import SIDE
 from tests.test_recommender import TODAY, make
+
+NOW = datetime(2026, 10, 24, 18, 0, tzinfo=JST)
+
+
+class FakeStore:
+    """Notion の代わりに、記録・更新をメモリに残す。"""
+
+    def __init__(self, recipes):
+        self.recipes = {r.id: r for r in recipes}
+        self.logs: dict[str, Log] = {}
+        self.last_made: dict[str, object] = {}
+        self.ratings: dict[str, str] = {}
+
+    def create_log(self, recipes, decided_at):
+        log_id = f"log-{len(self.logs) + 1}"
+        title = f"{decided_at.date()} " + "＋".join(r.name for r in recipes)
+        self.logs[log_id] = Log(log_id, title, [r.id for r in recipes], "確認待ち")
+        self.decided_at = decided_at
+        return log_id
+
+    def fetch_log(self, log_id):
+        return self.logs[log_id]
+
+    def update_log(self, log_id, status):
+        log = self.logs[log_id]
+        self.logs[log_id] = Log(log.id, log.title, log.recipe_ids, status)
+
+    def fetch_recipe(self, recipe_id):
+        return self.recipes.get(recipe_id)
+
+    def set_last_made(self, recipe_id, day):
+        self.last_made[recipe_id] = day
+
+    def set_rating(self, recipe_id, rating):
+        self.ratings[recipe_id] = rating
 
 
 def recipes():
@@ -28,7 +66,13 @@ def recipes():
 
 def make_bot(interpret=lambda text: ("ヘトヘト", "がっつり")):
     data = recipes()
-    return main.Bot(load_recipes=lambda: data, select=None, interpret=interpret, today=lambda: TODAY)
+    return main.Bot(
+        load_recipes=lambda: data,
+        select=None,
+        interpret=interpret,
+        now=lambda: NOW,
+        store=FakeStore(data),
+    )
 
 
 def buttons(message):
@@ -129,7 +173,7 @@ def test_free_text_falls_back_to_buttons_on_error():
 
 
 def test_no_candidates():
-    bot = main.Bot(load_recipes=lambda: [], select=None, interpret=None, today=lambda: TODAY)
+    bot = main.Bot(load_recipes=lambda: [], select=None, interpret=None, now=lambda: NOW)
     [m] = bot.handle_postback(msg.encode({"a": "mood", "c": "ヘトヘト", "m": "がっつり"}))
     assert "見つかりませんでした" in m["text"]
 
@@ -222,3 +266,74 @@ def test_webhook_rejects_bad_signature(webhook):
 )
 def test_short_url(url, expected):
     assert msg.short_url(url) == expected
+
+
+
+# --- 献立ログと「作った？」（ステップ5） -----------------------------------
+
+
+def decide(bot, condition="ヘトヘト", label="これにする"):
+    """提案を出して決めるところまで進め、作られたログを返す。"""
+    [m] = bot.handle_postback(msg.encode({"a": "mood", "c": condition, "m": "なんでも"}))
+    assert press(bot, m, label)["text"] == "いってらっしゃい！"
+    [log] = bot.store.logs.values()
+    return log
+
+
+def test_decision_creates_pending_log():
+    bot = make_bot()
+    log = decide(bot)
+    assert log.status == "確認待ち"
+    assert len(log.recipe_ids) == 2
+    assert log.title.startswith("2026-10-24 ")
+    assert bot.store.decided_at == NOW
+
+
+def test_made_updates_recipes_and_log():
+    bot = make_bot()
+    log = decide(bot)
+    [reply] = bot.handle_postback(msg.encode({"a": "made", "l": log.id}))
+    assert reply["text"] == "おつかれさま！記録しておきました"
+    assert "quickReply" not in reply  # 一軍だけなので評価は聞かない
+    assert bot.store.last_made == {rid: NOW.date() for rid in log.recipe_ids}
+    assert bot.store.logs[log.id].status == "作った"
+
+
+def test_made_with_untried_recipe_asks_rating():
+    bot = make_bot()
+    log = decide(bot, condition="余裕あり", label="Aにする")  # A は作ったことないレシピを含む
+    [reply] = bot.handle_postback(msg.encode({"a": "made", "l": log.id}))
+    untried = [bot.store.recipes[r] for r in log.recipe_ids if bot.store.recipes[r].is_untried]
+    assert len(untried) == 1
+    assert f"初めての「{untried[0].name}」、どうだった？" in reply["text"]
+    assert [lbl for lbl, _ in buttons(reply)] == ["おいしい", "ふつう", "残念"]
+
+    rated = press(bot, reply, "おいしい")
+    assert rated["text"] == "一軍入り！次から候補に入れておきます"
+    assert bot.store.ratings == {untried[0].id: "おいしい"}
+
+
+def test_not_made_changes_only_log():
+    bot = make_bot()
+    log = decide(bot)
+    [reply] = bot.handle_postback(msg.encode({"a": "notmade", "l": log.id}))
+    assert reply["text"] == "了解！また今度作りましょう"
+    assert bot.store.last_made == {}
+    assert bot.store.logs[log.id].status == "作ってない"
+
+
+def test_answering_twice_does_not_update_again():
+    bot = make_bot()
+    log = decide(bot)
+    bot.handle_postback(msg.encode({"a": "notmade", "l": log.id}))
+    [reply] = bot.handle_postback(msg.encode({"a": "made", "l": log.id}))
+    assert reply["text"] == "この献立はもう記録してあります"
+    assert bot.store.last_made == {}
+    assert bot.store.logs[log.id].status == "作ってない"
+
+
+def test_confirm_message():
+    log = Log("log-1", "2026-10-24 しょうが焼き＋漬け新玉ねぎ", ["r1", "r2"], "確認待ち")
+    m = msg.confirm_message(log)
+    assert m["text"] == "さっき決めた「しょうが焼き＋漬け新玉ねぎ」、作った？"
+    assert buttons(m) == [("作った", {"a": "made", "l": "log-1"}), ("作ってない", {"a": "notmade", "l": "log-1"})]

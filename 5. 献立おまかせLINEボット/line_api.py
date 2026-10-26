@@ -31,6 +31,17 @@ def reply(token: str, reply_token: str, messages: list[dict]) -> None:
     response.raise_for_status()
 
 
+def push(token: str, user_id: str, messages: list[dict]) -> None:
+    """こちらから送る（「作った？」の確認用）。無料プランの月間上限にカウントされる。"""
+    response = requests.post(
+        f"{LINE_API}/message/push",
+        headers=_headers(token),
+        json={"to": user_id, "messages": messages},
+        timeout=10,
+    )
+    response.raise_for_status()
+
+
 def show_loading(token: str, user_id: str, seconds: int = 20) -> None:
     """返信までの間、トーク画面に「…」を表示する（Claude の応答待ちが数秒かかるため）。"""
     requests.post(
