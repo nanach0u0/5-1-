@@ -1,0 +1,31 @@
+# 献立おまかせLINEボット: [これにする]から90分たった献立に「作った？」を送る（requirements.md 3.2）
+name: 献立ボット「作った？」の送信
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"  # 30分おき（GitHub の混雑で数分〜数十分遅れることがある）
+  workflow_dispatch:  # Actions の画面から手動でも実行できる
+
+# 前の実行が終わる前に次が始まって、同じ確認を2回送らないようにする
+concurrency:
+  group: kondate-followup
+  cancel-in-progress: false
+
+jobs:
+  followup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: "5. 献立おまかせLINEボット"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install requests python-dotenv
+      - run: python followup.py
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}

@@ -1,0 +1,10 @@
+# Cloud Run にアップロードしないもの（秘密情報とテスト・開発用のファイル）
+.env
+.env.*
+!.env.example
+.claude/
+tests/
+.pytest_cache/
+__pycache__/
+*.pyc
+requirements.md
