@@ -24,7 +24,7 @@ Bot ：今日はこれどう？
 - **提案は Notion のレシピからだけ**: AI に新しいレシピは考えさせません。候補の絞り込み（手間・評価・かぶり防止）は Python のルールで行い、最後の組み合わせ選びと理由の1文だけを Claude に任せます。
 - **選択肢は最大2つ**: ふだんは1セット。「余裕あり」の日だけ、まだ作ったことのないレシピを含む【A】と、一軍だけの【B】の2択にします。[別のがいい]で引き直せるのは2回までです。
 - **自由文にも対応**: 「疲れたけど肉食べたい」と送ると、Claude がコンディションと気分に読み替えて、ボタンを省いて提案します。
-- **「作った？」の確認**: [これにする]から約90分後に「作った？」と聞きます。[作った]を押すと、Notion の「最後に作った日」を更新します。初めて作ったレシピなら「どうだった？」と評価を聞き、Notion に書き込みます。
+- **「作った？」の確認**: [これにする]から90分以上たったら「作った？」と聞きます（GitHub Actions の都合で、数時間後になることもあります）。[作った]を押すと、Notion の「最後に作った日」を更新します。初めて作ったレシピなら「どうだった？」と評価を聞き、Notion に書き込みます。
 - **本人専用**: LINE の署名を検証し、自分の userId 以外からのメッセージは無視します。
 
 ## 仕組み
@@ -38,7 +38,7 @@ Cloud Run（main.py / FastAPI）
    ├─ Claude API … 献立の最終選択と理由文、自由文の読み替え
    └─ LINE Messaging API … 返信
 
-GitHub Actions（30分おき）
+GitHub Actions（30分おきの設定。実際は数時間おきになることがある）
    └─ followup.py … 決めてから90分たった献立に「作った？」を送る
 ```
 
@@ -110,7 +110,9 @@ gcloud projects add-iam-policy-binding <プロジェクトID> --member="serviceA
 
 ### 「作った？」の送信（GitHub Actions）
 
-[.github/workflows/kondate-followup.yml](../.github/workflows/kondate-followup.yml) が30分おきに `followup.py` を実行します。リポジトリの Settings → Secrets and variables → Actions に、次の3つを登録してください。
+[.github/workflows/kondate-followup.yml](../.github/workflows/kondate-followup.yml) が30分おきに `followup.py` を実行する設定です。GitHub は混雑しているときに定期実行を間引くため、30分おきの設定でも、実際には数時間おきにしか動かないことがあります（10月26日〜30日の4日間では、2.8〜6.9時間おきに19回）。「作った？」が届くのは、決めてから90分〜数時間後です。
+
+リポジトリの Settings → Secrets and variables → Actions に、次の3つを登録してください。
 
 - `NOTION_TOKEN`
 - `LINE_CHANNEL_ACCESS_TOKEN`
