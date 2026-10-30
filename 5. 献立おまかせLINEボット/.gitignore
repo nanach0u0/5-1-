@@ -1,0 +1,8 @@
+# 秘密情報（キー・トークン）は絶対にコミットしない
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
